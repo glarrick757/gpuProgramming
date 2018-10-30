@@ -23,9 +23,6 @@ __global__ void k1( float* g_dataA, float* g_dataB, int floatpitch, int width)
 	unsigned int j = blockIdx.x * blockDim.x + threadIdx.x;
 	j = j + 1; //because the edge of the data is not processed
 	
-	//block relative row index
-	int by = threadIdx.y + 1;
-	
 	//block relative column index
 	int bx = threadIdx.x + 1;
 	
