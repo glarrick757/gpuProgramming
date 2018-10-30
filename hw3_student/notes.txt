@@ -1,0 +1,1 @@
+Note that the old matrix is used for all calculations in a given iteration - that is, updating one value does not affect the values around it
