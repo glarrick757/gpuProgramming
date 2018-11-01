@@ -8,7 +8,25 @@
 __global__ void diffKernel( float *in, float *out, int n )
 {
     // Wrtie the kernel to implement the diff operation on an array Using shared memory
-
+	unsigned int tx = threadIdx.x;
+	
+	__shared__ int s_data[BLOCKSIZE];
+	
+	unsigned int i = blockDim.x * blockIdx.x + tx;
+	
+	if(i < n) {
+		s_data[tx] = in[i];
+	}
+	
+	__syncthreads();
+	
+	if(tx > 0) {
+		out[i] = s_data[tx] - s_data[tx - 1];
+	}
+	
+	else if(i > 0) {
+		out[i] = s_data[tx] - in[i - 1];
+	}
 }  
  
 int main( int argc, char* argv[] )
@@ -24,7 +42,7 @@ int main( int argc, char* argv[] )
     float *h_out = (float *) malloc(n * sizeof(float));
  
     // Device input vectors
-    float *d_in;;
+    float *d_in;
     //Device output vector
     float *d_out;
  
@@ -41,11 +59,16 @@ int main( int argc, char* argv[] )
     // TODO: setup the blocksize and gridsize and launch the kernel below.
      
     // Number of threads in each thread block
- 
+	int blockSize = BLOCKSIZE;
+	
     // Number of thread blocks in grid
- 
+	int gridSize = (int)ceil((float)n/blockSize);
+	
+	// Size of shared memory
+	int sharedSize = blockSize * sizeof(float);
+	
     // Execute the kernel
-
+	diffKernel<<<gridSize, blockSize, sharedSize>>>(d_in, d_out, n);
  
     // Copy array back to host
     cudaMemcpy( h_out, d_out, bytes, cudaMemcpyDeviceToHost );
