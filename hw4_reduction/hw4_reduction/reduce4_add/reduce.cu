@@ -213,7 +213,7 @@ void runReduce2( float *arr, int  n_old, int tile_width)
    int num_in = n, num_out = ceil((float)n / tile_width);
    float *temp;
   
-   printf("Timing simple GPU implementationâ€¦ \n");
+   printf("Timing simple GPU implementation... \n");
    // record a CUDA event immediately before and after the kernel launch
    cudaEventRecord(launch_begin,0);
    while( 1 )
