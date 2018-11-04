@@ -92,7 +92,7 @@ __global__ void reduce2(float *in, float *out, int n)
     // load shared mem
     unsigned int tid = threadIdx.x;
     unsigned int i = blockIdx.x*blockDim.x + threadIdx.x;
-
+	
     sdata[tid] = (i < n) ? in[i] : 0;
 
     __syncthreads();
@@ -113,6 +113,48 @@ __global__ void reduce2(float *in, float *out, int n)
     if (tid == 0) out[blockIdx.x] = sdata[0];
 }
 
+__global__ void reduce3(float *in, float *out, int n) {
+    extern __shared__ float sdata[];
+	
+    // load shared mem
+    int stride = blockDim.x;
+    unsigned int tid = threadIdx.x;
+    unsigned int i = blockIdx.x*blockDim.x*2 + threadIdx.x;
+	
+    if(i < n) {
+	sdata[tid] = in[i];
+	
+	if(i + stride < n) {
+		sdata[tid + stride] = in[i + stride];
+	}
+
+	else {
+		sdata[tid + stride] = 0;
+	}
+    }
+
+    else {
+	sdata[tid] = 0;
+	sdata[tid + stride] = 0;
+    }
+	
+    __syncthreads();
+	
+    // do reduction in shared mem
+    for (unsigned int s=stride; s >= 1; s /= 2)
+    {
+        if (tid < s)
+        {
+            sdata[tid] += sdata[tid + s]; //sum number stored in low index
+        }
+
+        __syncthreads();
+    }
+	
+    // write result for this block to global mem
+    if (tid == 0) out[blockIdx.x] = sdata[0];
+}
+
 // Check if an int is power of 2
 int isPowerOfTwo (unsigned int x)
 {
@@ -129,8 +171,7 @@ void usage()
 }
 
 
-//
-void runCUDA( float *arr, int  n_old, int tile_width)
+void runReduce2( float *arr, int  n_old, int tile_width)
 {    
    // set up host memory
    float *h_in, *h_out, *d_in, *d_out;
@@ -139,12 +180,12 @@ void runCUDA( float *arr, int  n_old, int tile_width)
    h_out = (float *)malloc(MAXDRET * sizeof(float));
    memset(h_out, 0, MAXDRET * sizeof(float));
 
-
    if( ! h_in || ! h_out )
    {
        printf("Error in host memory allocation!\n");
        exit(-1);
    }
+   
    int num_block = ceil(n / (float)tile_width);
    printf("Num of blocks is %d\n", num_block);
    dim3 block(tile_width, 1, 1);
@@ -172,12 +213,107 @@ void runCUDA( float *arr, int  n_old, int tile_width)
    int num_in = n, num_out = ceil((float)n / tile_width);
    float *temp;
   
-   printf("Timing simple GPU implementation… \n");
+   printf("Timing simple GPU implementationâ€¦ \n");
    // record a CUDA event immediately before and after the kernel launch
    cudaEventRecord(launch_begin,0);
    while( 1 )
    {
        reduce2<<<grid, block, tile_width * sizeof(float)>>>(d_in, d_out, num_in);
+       check_cuda_errors(__FILE__, __LINE__);
+       cudaDeviceSynchronize();
+
+       // if the number of local sum returned by kernel is greater than the threshold,
+       // we do reduction on GPU for these returned local sums for another pass,
+       // until, num_out < threshold
+       if(num_out >= THRESH)
+       {
+           num_in = num_out;
+           num_out = ceil((float)num_out / tile_width);
+           grid.x = num_out; //change the grid dimension in x direction
+           //Swap d_in and d_out, so that in the next iteration d_out is used as input and d_in is the output.
+           temp = d_in;
+           d_in = d_out;
+           d_out = temp;
+       }
+       else
+       {
+           //copy the ouput of last lauch back to host,
+           cudaMemcpy(h_out, d_out, sizeof(float) * num_out, cudaMemcpyDeviceToHost);
+           break;
+       }
+    }//end of while
+
+    cudaEventRecord(launch_end,0);
+    cudaEventSynchronize(launch_end);
+
+    // measure the time spent in the kernel
+    float time = 0;
+    cudaEventElapsedTime(&time, launch_begin, launch_end);
+
+    printf(" done! GPU time cost in second: %f\n", time / 1000);
+    printf("The output from device is:");
+    //if(shouldPrint)
+    printArray(h_out, num_out);
+
+    // deallocate device memory
+    cudaFree(d_in);
+    cudaFree(d_out);
+    free(h_out);
+    cudaEventDestroy(launch_begin);
+    cudaEventDestroy(launch_end);
+}
+
+void runReduce3( float *arr, int  n_old, int tile_width)
+{    
+   // set up host memory
+   float *h_in, *h_out, *d_in, *d_out;
+   int n = 0;
+   h_in = GPUPrep(arr, n_old, &n); //Make input size power of 2.
+   h_out = (float *)malloc(MAXDRET * sizeof(float));
+   memset(h_out, 0, MAXDRET * sizeof(float));
+
+   if( ! h_in || ! h_out )
+   {
+       printf("Error in host memory allocation!\n");
+       exit(-1);
+   }
+   
+   int blockSize = tile_width / 2;
+
+   //Only need enough blocks to process half of input array size
+   int num_block = ceil(n / (float)tile_width);
+   printf("Num of blocks is %d\n", num_block);
+   dim3 block(blockSize, 1, 1);
+   dim3 grid(num_block, 1, 1);
+
+   // allocate storage for the device
+   cudaMalloc((void**)&d_in, sizeof(float) * n);
+   cudaMalloc((void**)&d_out, sizeof(float) * MAXDRET);
+   cudaMemset(d_out, 0, sizeof(float) * MAXDRET);
+
+   // copy input to the device
+   cudaMemcpy(d_in, h_in, sizeof(float) * n, cudaMemcpyHostToDevice);
+
+   // time the kernel launches using CUDA events
+   cudaEvent_t launch_begin, launch_end;
+   cudaEventCreate(&launch_begin);
+   cudaEventCreate(&launch_end);
+
+   printf("The input array is:\n");
+   //print out original array
+   if(shouldPrint)
+       printArray(h_in, n);
+
+
+   int num_in = n, num_out = ceil((float)n / tile_width);
+   float *temp;
+  
+   printf("Timing kernel 3 GPU implementation... \n");
+   // record a CUDA event immediately before and after the kernel launch
+   cudaEventRecord(launch_begin,0);
+   while( 1 )
+   {
+       reduce3<<<grid, block, tile_width * sizeof(float)>>>(d_in, d_out, num_in);
        check_cuda_errors(__FILE__, __LINE__);
        cudaDeviceSynchronize();
 
@@ -231,7 +367,7 @@ void runCPU( float * arr, int n )
     int num_cpu_test = 3;
     float sum = 0;
 
-    printf("Timing CPU implementation…\n");
+    printf("Timing CPU implementation...\n");
     for(int i = 0; i < num_cpu_test; ++i) //launch 3 times on CPU
     {
         // timing on CPU
@@ -289,7 +425,8 @@ int main(int argc, char *argv[])
     //generate input data from random generator
     float *data = fillArray(n, UPB);
    
-    runCUDA( data, n, tile_width );
+    runReduce2( data, n, tile_width );
+    runReduce3( data, n, tile_width );
     runCPU( data, n );   
 
     //--------------------------------clean up-----------------------------------------------------
