@@ -25,12 +25,14 @@ __device__ int gpu_isAlpha(char ch)
 
 __global__ void wordCount2( char **a, int **out, int numLine, int maxLineLen )
 {
-	__extern__ shared char[] line;
+	shared __extern__ char[] line;
 	
 	int row = threadIdx.y + blockDim.y * blockIdx.y;
 	int col = threadIdx.x + blockDim.x * blockIdx.x;
 	
 	line[threadIdx.x] = a[row][col];
+	
+	__syncthreads();
 	
 	if(row < numLine && col < maxLineLen && col < length) {
 		alphaValue = gpu_isAlpha(line[row][col]);
