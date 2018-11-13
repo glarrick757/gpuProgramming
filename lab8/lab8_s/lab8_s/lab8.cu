@@ -18,27 +18,30 @@ __device__ int gpu_strlen(char * s)
 __device__ int gpu_isAlpha(char ch)
 {
     if((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z'))
-        return 1;
-    else
         return 0;
+    else
+        return 1;
 }
 
 __global__ void wordCount2( char **a, int **out, int numLine, int maxLineLen )
 {
-	shared __extern__ char[] line;
+	__shared__ char line[C];
 	
 	int row = threadIdx.y + blockDim.y * blockIdx.y;
 	int col = threadIdx.x + blockDim.x * blockIdx.x;
-	
-	line[threadIdx.x] = a[row][col];
+	int length = gpu_strlen(a[row]);
+	int prevAlphaValue = 0;
+	int alphaValue = 0;
+
+	line[col] = a[row][col];
 	
 	__syncthreads();
 	
 	if(row < numLine && col < maxLineLen && col < length) {
-		alphaValue = gpu_isAlpha(line[row][col]);
+		alphaValue = gpu_isAlpha(line[col]);
 		
 		if(alphaValue == 1) {
-			prevAlphaValue = gpu_isAlpha(line[row][col - 1]);
+			prevAlphaValue = gpu_isAlpha(line[col - 1]);
 			if(prevAlphaValue == 1) {
 				out[row][col] = 0;
 			}
@@ -94,7 +97,7 @@ int main()
     {
         cudaMalloc((void **) &h_out[i],C * sizeof(char));
         h_in[i]=(char *)calloc(C, sizeof(char));//allocate or connect the input data to it
-        strcpy(h_in[i], "good morning and I'm a good student!");
+        strcpy(h_in[i], "for you:: he ");
         cudaMemcpy(h_out[i], h_in[i], strlen(h_in[i]) + 1, cudaMemcpyHostToDevice);
     }
     cudaMemcpy(d_in, h_out, sizeof(char *) * R,cudaMemcpyHostToDevice);
