@@ -11,7 +11,7 @@
  */
  
 __global__ void pgmSobel(int *d_pixelsIn, int *d_pixelsOut, float *d_orientation, int floatpitch, int width) {
-	extern __shared__ float s_data[];
+	extern __shared__ int s_data[];
   
     // global thread(data) row index 
 	unsigned int i = blockIdx.y * blockDim.y + threadIdx.y;
@@ -29,8 +29,8 @@ __global__ void pgmSobel(int *d_pixelsIn, int *d_pixelsOut, float *d_orientation
 	
 	//Left edge case
 	if(bx == 1) {
-		s_data[((bx - 1) * 3)] = d_pixels[(i-1) * floatpitch + (j-1)];
-		s_data[((bx - 1) * 3) + 1] = d_pixels[i * floatpitch + (j-1)];
+		s_data[((bx - 1) * 3)] = d_pixelsIn[(i-1) * floatpitch + (j-1)];
+		s_data[((bx - 1) * 3) + 1] = d_pixelsIn[i * floatpitch + (j-1)];
 		s_data[((bx - 1) * 3) + 2] = d_pixelsIn[(i+1) * floatpitch + (j-1)];
 		s_data[(bx * 3)] = d_pixelsIn[(i-1) * floatpitch +  j];
 		s_data[(bx * 3) + 1] = d_pixelsIn[i * floatpitch +  j];
@@ -56,21 +56,23 @@ __global__ void pgmSobel(int *d_pixelsIn, int *d_pixelsOut, float *d_orientation
 	__syncthreads();
 	
 	double dx = (
-		  1f * s_data[(bx + 1) * 3      ] +          //NE
-		  2f * s_data[((bx + 1) * 3) + 1] +          //E
-		  1f * s_data[((bx + 1) * 3) + 2] -          //SE
-		  1f * s_data[((bx - 1)* 3) + 2 ] -          //SW
-		  2f * s_data[((bx - 1)* 3) + 1 ] -          //W
-		  1f * s_data[(bx - 1)* 3       ]            //NW
+		  1 * s_data[(bx + 1) * 3      ] +          //NE
+		  2 * s_data[((bx + 1) * 3) + 1] +          //E
+		  1 * s_data[((bx + 1) * 3) + 2] -          //SE
+		  1 * s_data[((bx - 1)* 3) + 2 ] -          //SW
+		  2 * s_data[((bx - 1)* 3) + 1 ] -          //W
+		  1 * s_data[(bx - 1)* 3       ]            //NW
+	);
 	
 	double dy = (
-		  2f * s_data[(bx * 3)          ] +          //N
-		  1f * s_data[(bx + 1) * 3      ] -          //NE
-		  1f * s_data[((bx + 1) * 3) + 2] -          //SE
-		  2f * s_data[(bx * 3) + 2      ] -          //S
-		  1f * s_data[((bx - 1)* 3) + 2 ] +          //SW
-		  1f * s_data[(bx - 1)* 3       ]            //NW
-		  
-	d_pixelsOut[i * floatpitch + j] = sqrt(dx * dx + dy * dy) / 1141;
+		  2 * s_data[(bx * 3)          ] +          //N
+		  1 * s_data[(bx + 1) * 3      ] -          //NE
+		  1 * s_data[((bx + 1) * 3) + 2] -          //SE
+		  2 * s_data[(bx * 3) + 2      ] -          //S
+		  1 * s_data[((bx - 1)* 3) + 2 ] +          //SW
+		  1 * s_data[(bx - 1)* 3       ]            //NW
+	);
+	
+	d_pixelsOut[i * floatpitch + j] = sqrt(dx * dx + dy * dy);
 	d_orientation[i * floatpitch + j] = atan(dy / dx) + 3.14159;
 }

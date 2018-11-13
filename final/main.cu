@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "pgmUtility.h"
+#include "pgmProcess.h"
 #include "timing.h"
 
 int device = 0;
@@ -12,47 +13,35 @@ void usage()
 	exit(1);
 }
 
-void readData(FILE *oldImageFile, int *numRows, int *numCols, char **header, float *h_dataA, float *h_dataB, float *h_orientation) {
-	numRows = (int*)malloc(sizeof(int));
-	numCols = (int*)malloc(sizeof(int));
-	header = initAra2D(rowsInHeader, 2);
-	h_dataA = pgmRead(header, numRows, numCols, oldImageFile);
-	h_dataB = (float *)malloc(*numRows*(*numCols)*sizeof(float));
-	h_orientation = (float *)malloc(*numRows*(*numCols)*sizeof(float));
-}
-
-void runSobel(float *h_dataA, float* h_dataB, int *numCols, int *numRows, int passes, int threadsPerBlock, int shouldPrint){
-
-   // Use card 0  (See top of file to make sure you are using your assigned device.)
-   checkCudaErrors(cudaSetDevice(device));
+void runSobel(int *h_dataA, int* h_dataB, float *h_orientation, int *numCols, int *numRows, int threadsPerBlock){
 
    // To ensure alignment, we'll use the code below to pad rows of the arrays when they are 
    // allocated on the device.
    size_t pitch;
    // allocate device memory for data A
-   float* d_dataA;
-   checkCudaErrors( cudaMallocPitch( (void**) &d_dataA, &pitch, *numCols * sizeof(float), *numRows));
+   int* d_dataA;
+   cudaMallocPitch( (void**) &d_dataA, &pitch, *numCols * sizeof(int), *numRows);
    
    // copy host memory to device memory for image A
-   checkCudaErrors( cudaMemcpy2D( d_dataA, pitch, h_dataA, *numCols * sizeof(float), *numCols * sizeof(float), *numRows,
-                             cudaMemcpyHostToDevice) );
+   cudaMemcpy2D( d_dataA, pitch, h_dataA, *numCols * sizeof(int), *numCols * sizeof(int), *numRows,
+                             cudaMemcpyHostToDevice);
    
    
    // repeat for second device array
-   float* d_dataB;
-   checkCudaErrors( cudaMallocPitch( (void**) &d_dataB, &pitch, *numCols * sizeof(float), *numRows));
+   int* d_dataB;
+   cudaMallocPitch( (void**) &d_dataB, &pitch, *numCols * sizeof(int), *numRows);
    
    // copy host memory to device memory for image B
-   checkCudaErrors( cudaMemcpy2D( d_dataB, pitch, h_dataB, *numCols * sizeof(float), *numCols * sizeof(float), *numRows,
-                             cudaMemcpyHostToDevice) );
+   cudaMemcpy2D( d_dataB, pitch, h_dataB, *numCols * sizeof(int), *numCols * sizeof(int), *numRows,
+                             cudaMemcpyHostToDevice);
    
    // repeat for orientation array
    float* d_orientation;
-   checkCudaErrors( cudaMallocPitch( (void**) &d_orientation, &pitch, *numCols * sizeof(float), *numRows));
+   cudaMallocPitch( (void**) &d_orientation, &pitch, *numCols * sizeof(float), *numRows);
    
    // copy host memory to device memory for image B
-   checkCudaErrors( cudaMemcpy2D( d_orientation, pitch, h_dataB, *numCols * sizeof(float), *numCols * sizeof(float), *numRows,
-                             cudaMemcpyHostToDevice) );
+   cudaMemcpy2D( d_orientation, pitch, h_dataB, *numCols * sizeof(float), *numCols * sizeof(float), *numRows,
+                             cudaMemcpyHostToDevice);
                              
    //***************************
    // setup CUDA execution parameters
@@ -101,26 +90,17 @@ void runSobel(float *h_dataA, float* h_dataB, int *numCols, int *numRows, int pa
    // Format the blocks. 
    dim3  threads( blockWidth, blockHeight, 1);
   
-   float * temp;
-      //execute the kernel
-   pgmSobel<<< grid, threads, shared_mem_size >>>( d_dataA, d_dataB, d_orientation, pitch/sizeof(float), *numCols);
-      
-   // check if kernel execution generated an error
-   cudaError_t code = cudaGetLastError();
-   if (code != cudaSuccess){
-       printf ("Cuda Kerel Launch error -- %s\n", cudaGetErrorString(code));
-   }
-
-   //checkCudaErrors( cutStopTimer( timer));
+   //execute the kernel
+   pgmSobel<<< grid, threads, shared_mem_size >>>( d_dataA, d_dataB, d_orientation, pitch/sizeof(int), *numCols);
    
    // copy result from device to host
-   checkCudaErrors( cudaMemcpy2D( h_dataB, *numCols * sizeof(float), d_dataB, pitch, *numCols * sizeof(float), *numRows,cudaMemcpyDeviceToHost) );
-   checkCudaErrors( cudaMemcpy2D( h_orientation, *numCols * sizeof(float), d_orientation, pitch, *numCols * sizeof(float), *numRows,cudaMemcpyDeviceToHost) );
+   cudaMemcpy2D( h_dataB, *numCols * sizeof(int), d_dataB, pitch, *numCols * sizeof(int), *numRows,cudaMemcpyDeviceToHost);
+   cudaMemcpy2D( h_orientation, *numCols * sizeof(float), d_orientation, pitch, *numCols * sizeof(float), *numRows,cudaMemcpyDeviceToHost);
    
    // cleanup memory
-   checkCudaErrors(cudaFree(d_dataA));
-   checkCudaErrors(cudaFree(d_dataB));
-   checkCudaErrors(cudaFree(d_orientation));
+   cudaFree(d_dataA);
+   cudaFree(d_dataB);
+   cudaFree(d_orientation);
 }
 
 int main( int argc, char *argv[] )  
@@ -129,18 +109,23 @@ int main( int argc, char *argv[] )
 	FILE *newImageFile;
 	int *numRows;
 	int *numCols;
-	float *h_dataA;
-	float *h_dataB;
+	int *h_dataA;
+	int *h_dataB;
 	float *h_orientation;
 	char **header;
 
 	if( argc == 4 )
 	{
-		int threadsPerBlock = atoi(argv[1]);
+		int threadsPerBlock = atoi(argv[3]);
 		
 		if ((oldImageFile = fopen(argv[1], "r")) && (newImageFile = fopen(argv[2], "w"))) {
-			readData(FILE *oldImageFile, int *numRows, int *numCols, char **header, float *h_dataA, float *h_dataB, float *h_orientation);
-			runSobel(float *h_dataA, float* h_dataB, int *numCols, int *numRows, int threadsPerBlock);
+			numRows = (int*)malloc(sizeof(int));
+			numCols = (int*)malloc(sizeof(int));
+			header = initAra2D(rowsInHeader, 2);
+			h_dataA = pgmRead(header, numRows, numCols, oldImageFile);
+			h_dataB = (int *)malloc(*numRows*(*numCols)*sizeof(int));
+			h_orientation = (float *)malloc(*numRows*(*numCols)*sizeof(float));
+			runSobel(h_dataA, h_dataB, h_orientation, numCols, numRows, threadsPerBlock);
 			int errorCodeWrite = pgmWrite((const char **)header, h_dataB, *numRows, *numCols, newImageFile);
 			free(numRows);
 			free(numCols);

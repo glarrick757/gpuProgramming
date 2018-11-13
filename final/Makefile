@@ -7,8 +7,8 @@ pgmUtility.o: pgmUtility.cu
 pgmProcess.o: pgmProcess.cu
 	nvcc -arch=sm_52 -c pgmProcess.cu
 
-main.o: main.c
-	g++ -c -o main.o main.c -I.
+main.o: main.cu
+	nvcc -arch=sm_52 -c main.cu
 
 timing.o: timing.c
 	g++ -c -o timing.o timing.c -I.
