@@ -33,8 +33,34 @@ __global__ void matrix_multiply_improved(float *a, float *b, float *ab, size_t w
     // TODO: write the kernel to perform matrix a times b, store results into ab.
     // You are required to use shared memory to do tiled matrix-matrix multiplication
     // width is the size of the square matrix along one dimension.
-
-
+	int TILE_WIDTH = blockDim.x;
+	
+	extern __shared__ float Mds[];
+	extern __shared__ float Nds[];
+	
+	int bx = blockIdx.x;
+	int by = blockIdx.y;
+	int tx = threadIdx.x;
+	int ty = threadIdx.y;
+	
+	// Identify the row and column of the ab element to work on
+	int Row = by * TILE_WIDTH + ty;
+	int Col = bx * TILE_WIDTH + tx;
+	
+	float Pvalue = 0;
+	// Loop over the a and b tiles required to compute ab element
+	for(int m = 0; m < width/TILE_WIDTH; ++m) {
+		//Coolaborative loading of a and b tiles required to compute ab element
+		Mds[ty * TILE_WIDTH + tx] = a[Row * width + m * TILE_WIDTH + tx];
+		Nds[ty * TILE_WIDTH + tx] = b[(m * TILE_WIDTH + ty) * width + Col];
+		__syncthreads();
+		
+		for(int k = 0; k < TILE_WIDTH; ++k) {
+			Pvalue += Mds[ty * TILE_WIDTH + k] * Nds[k * TILE_WIDTH + tx];
+		}
+		__syncthreads();
+	}
+	ab[Row * width + Col] = Pvalue;
 }
 
 
@@ -117,7 +143,7 @@ int main(int argc, char *argv[])
   // time many kernel launches and take the average time
   const size_t num_launches = 10;
   float average_simple_time = 0;
-  printf("Timing simple GPU implementation… \n");
+  printf("Timing simple GPU implementation... \n");
   for(int i = 0; i < num_launches; ++i)
   {
     // record a CUDA event immediately before and after the kernel launch
@@ -135,52 +161,51 @@ int main(int argc, char *argv[])
   }
   average_simple_time /= num_launches;
   printf(" done! GPU time cost in second: %f\n", average_simple_time / 1000);
-
-  // now time the sequential code on CPU
-  // again, launch a single "warm-up" function call
-  mul(h_c, h_a, h_b, n);
-
-  // time many multiplication calls and take the average time
-  float average_cpu_time = 0;
-  double now, then;
-  int num_cpu_test = 3;
-  memset(h_c, 0, n * n * sizeof(float));
-
-  printf("Timing CPU implementation…\n");
-  for(int i = 0; i < num_cpu_test; ++i) //launch 3 times on CPU
-  {
-    // timing on CPU
-    then = currentTime();
-    mul(h_c, h_a, h_b, n);
-    now = currentTime();
-   
-    // measure the time spent on CPU
-    float time = 0;
-    time = now - then;
-
-    average_cpu_time += time;
-  }
-  average_cpu_time /= num_cpu_test;
-  printf(" done. CPU time cost in second: %f\n", average_cpu_time);
   
-  writeArray(h_c, n, n, "cpuout2");
-  if (shouldPrint)
-      printArray(h_c, n, n);
+  //Now do the improved GPU solution
+  // to get accurate timings, launch a single "warm-up" kernel
+  matrix_multiply_improved<<<num_blocks,block_size,block_size * sizeof(float)>>>(d_a, d_b, d_c, n);
+  cudaMemcpy(h_c, d_c, sizeof(float) * n * n, cudaMemcpyDeviceToHost);
 
+  writeArray(h_c, n, n, "gpuout3");
+  if(shouldPrint)
+      printArray(h_c, n, n); 
+
+  // time many kernel launches and take the average time
+  float average_improved_time = 0;
+  printf("Timing improved GPU implementation... \n");
+  for(int i = 0; i < num_launches; ++i)
+  {
+    // record a CUDA event immediately before and after the kernel launch
+    cudaEventRecord(launch_begin,0);
+    matrix_multiply_improved<<<num_blocks,block_size,block_size * sizeof(float)>>>(d_a, d_b, d_c, n);
+    
+    cudaEventRecord(launch_end,0);
+    cudaEventSynchronize(launch_end);
+
+    // measure the time spent in the kernel
+    float time = 0;
+    cudaEventElapsedTime(&time, launch_begin, launch_end);
+
+    average_improved_time += time;
+  }
+  average_improved_time /= num_launches;
+  printf(" done! Improved GPU time cost in second: %f\n", average_improved_time / 1000);
+  
   // report the effective throughput of each kernel in GFLOPS
   // the effective throughput is measured as the number of floating point operations performed per second:
   // (one mul + one addition) * N^3 operations
   float simple_throughput = (2.0f * n * n * n) / (average_simple_time / 1000.0f) / 1000000000.0f; //time in millisecond
-  float cpu_throughput = (2.0f * n * n * n) / (average_cpu_time) / 1000000000.0f;  //time in second
-  float speedup = average_cpu_time / (average_simple_time / 1000.0f);
+  float improved_throughput = (2.0f * n * n * n) / (average_improved_time / 1000.0f) / 1000000000.0f; //time in millisecond
+  float speedup = simple_throughput / improved_throughput;
 
   printf("Matrix size:  %d x %d \n", n, n);
   printf("Tile size: %d x %d\n", tile_width, tile_width);
  
 
   printf("Throughput of simple kernel: %.2f GFLOPS\n",simple_throughput);
-  printf("Throughput of cpu code: %.2f GFLOPS\n", cpu_throughput);
-  printf("Performance improvement: simple_throughput / cpu_throughput = %.2f x\n", simple_throughput / cpu_throughput );
+  printf("Throughput of improved kernel: %.2f GFLOPS\n", improved_throughput);
+  printf("Performance improvement: improved_throughput / simple_throughput = %.2f x\n", improved_throughput / simple_throughput );
   printf("Speedup in terms of time cost: %.2f x\n", speedup);
 
   // destroy the CUDA events
