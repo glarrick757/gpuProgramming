@@ -15,6 +15,7 @@
 
 #define rowsInHeader 4      // number of rows in image header
 #define maxSizeHeadRow 200  // maximal number characters in one row in the header
+#define PI 3.14159265359
 
 int * parseIntArray(char *line, int len);
 char ** initAra2D(int rows, int cols);
@@ -53,5 +54,7 @@ int * pgmRead( char **header, int *numRows, int *numCols, FILE *in  );
  *                          else return -1;
  */
 int pgmWrite( const char **header, const int *pixels, int numRows, int numCols, FILE *out );
+
+double *computeGaussian(double sigma);
 
 #endif

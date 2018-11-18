@@ -103,3 +103,17 @@ int pgmWrite( const char **header, const int *pixels, int numRows, int numCols, 
 	return 1;
 }
 
+double *computeGaussian(double sigma) {
+	double *guassian = (double *)malloc(sizeof(double) * 9);
+	int row, col, x, y;
+	printf("sigma %f\n",sigma);
+	for(row = 0; row < 3; row++) {
+		for(col = 0; col < 3; col++) {
+			x = abs(col - 1);
+			y = abs(row - 1); 
+			guassian[row * 3 + col] = (1 / (2 * PI * sigma * sigma)) * exp(-1 * (x * x + y * y) / (2 * sigma * sigma));
+		}
+	}
+	
+	return guassian;
+}

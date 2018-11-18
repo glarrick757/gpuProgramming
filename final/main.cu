@@ -13,13 +13,20 @@ void usage()
 	exit(1);
 }
 
-void runSobel(int *h_dataA, int* h_dataB, float *h_orientation, int *numCols, int *numRows, int threadsPerBlock){
+void runCanny(int *h_dataA, int* h_dataB, float *h_orientation, int *numCols, int *numRows, int threadsPerBlock, double sigma){
 
    // To ensure alignment, we'll use the code below to pad rows of the arrays when they are 
    // allocated on the device.
    size_t pitch;
    // allocate device memory for data A
    int* d_dataA;
+   
+   //compute gaussian kernel
+   double *guassian = computeGaussian(sigma);
+   double *d_guassian;
+   cudaMalloc( (void**) &d_guassian, 9 * sizeof(float));
+   cudaMemcpy( d_guassian, guassian, 9 * sizeof(float), cudaMemcpyHostToDevice);
+							 
    cudaMallocPitch( (void**) &d_dataA, &pitch, *numCols * sizeof(int), *numRows);
    
    // copy host memory to device memory for image A
@@ -34,6 +41,10 @@ void runSobel(int *h_dataA, int* h_dataB, float *h_orientation, int *numCols, in
    // copy host memory to device memory for image B
    cudaMemcpy2D( d_dataB, pitch, h_dataB, *numCols * sizeof(int), *numCols * sizeof(int), *numRows,
                              cudaMemcpyHostToDevice);
+	
+   // repeat for second device array
+   int* d_dataC;
+   cudaMallocPitch( (void**) &d_dataC, &pitch, *numCols * sizeof(int), *numRows);
    
    // repeat for orientation array
    float* d_orientation;
@@ -89,15 +100,31 @@ void runSobel(int *h_dataA, int* h_dataB, float *h_orientation, int *numCols, in
    
    // Format the blocks. 
    dim3  threads( blockWidth, blockHeight, 1);
-  
-   //execute the kernel
-   pgmSobel<<< grid, threads, shared_mem_size >>>( d_dataA, d_dataB, d_orientation, pitch/sizeof(int), *numCols);
+   
+   int i, j;
+   printf("guassian \n");
+   for(i = 0; i < 3; i++) {
+	for(j = 0; j < 3; j++) {
+		printf("%f ", guassian[i * 3 + j]);
+	}
+	printf("\n");
+   }
+   
+   //execute guassian blur kernel
+   gaussianBlur<<< grid, threads, shared_mem_size >>>( d_dataA, d_dataB, d_guassian, pitch/sizeof(int), *numCols); 
+   
+   //execute sobel kernel
+   pgmSobel<<< grid, threads, shared_mem_size >>>( d_dataB, d_dataA, d_orientation, pitch/sizeof(int), *numCols);
+   
+   //execute non-maximum supression kernel
+   pgmNonMaximumSupression<<< grid, threads, shared_mem_size >>>(d_dataA, d_dataC, d_orientation, pitch/sizeof(int), *numCols);
    
    // copy result from device to host
-   cudaMemcpy2D( h_dataB, *numCols * sizeof(int), d_dataB, pitch, *numCols * sizeof(int), *numRows,cudaMemcpyDeviceToHost);
+   cudaMemcpy2D( h_dataB, *numCols * sizeof(int), d_dataC, pitch, *numCols * sizeof(int), *numRows,cudaMemcpyDeviceToHost);
    cudaMemcpy2D( h_orientation, *numCols * sizeof(float), d_orientation, pitch, *numCols * sizeof(float), *numRows,cudaMemcpyDeviceToHost);
    
    // cleanup memory
+   free(guassian);
    cudaFree(d_dataA);
    cudaFree(d_dataB);
    cudaFree(d_orientation);
@@ -113,10 +140,11 @@ int main( int argc, char *argv[] )
 	int *h_dataB;
 	float *h_orientation;
 	char **header;
-
-	if( argc == 4 )
+	
+	if( argc == 5 )
 	{
 		int threadsPerBlock = atoi(argv[3]);
+		double sigma = atof(argv[4]);
 		
 		if ((oldImageFile = fopen(argv[1], "r")) && (newImageFile = fopen(argv[2], "w"))) {
 			numRows = (int*)malloc(sizeof(int));
@@ -125,7 +153,7 @@ int main( int argc, char *argv[] )
 			h_dataA = pgmRead(header, numRows, numCols, oldImageFile);
 			h_dataB = (int *)malloc(*numRows*(*numCols)*sizeof(int));
 			h_orientation = (float *)malloc(*numRows*(*numCols)*sizeof(float));
-			runSobel(h_dataA, h_dataB, h_orientation, numCols, numRows, threadsPerBlock);
+			runCanny(h_dataA, h_dataB, h_orientation, numCols, numRows, threadsPerBlock, sigma);
 			int errorCodeWrite = pgmWrite((const char **)header, h_dataB, *numRows, *numCols, newImageFile);
 			free(numRows);
 			free(numCols);
