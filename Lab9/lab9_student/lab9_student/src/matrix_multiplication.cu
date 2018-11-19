@@ -35,8 +35,10 @@ __global__ void matrix_multiply_improved(float *a, float *b, float *ab, size_t w
     // width is the size of the square matrix along one dimension.
 	int TILE_WIDTH = blockDim.x;
 	
-	extern __shared__ float Mds[];
-	extern __shared__ float Nds[];
+	extern __shared__ float s_data[];
+
+	float * Mds = (float *) s_data;
+	float * Nds = (float *) &Mds[width * width];
 	
 	int bx = blockIdx.x;
 	int by = blockIdx.y;
@@ -51,12 +53,12 @@ __global__ void matrix_multiply_improved(float *a, float *b, float *ab, size_t w
 	// Loop over the a and b tiles required to compute ab element
 	for(int m = 0; m < width/TILE_WIDTH; ++m) {
 		//Coolaborative loading of a and b tiles required to compute ab element
-		Mds[ty * TILE_WIDTH + tx] = a[Row * width + m * TILE_WIDTH + tx];
-		Nds[ty * TILE_WIDTH + tx] = b[(m * TILE_WIDTH + ty) * width + Col];
+		Mds[ty * width + tx] = a[Row * width + m * TILE_WIDTH + tx];
+		Nds[ty * width + tx] = b[(m * TILE_WIDTH + ty) * width + Col];
 		__syncthreads();
 		
 		for(int k = 0; k < TILE_WIDTH; ++k) {
-			Pvalue += Mds[ty * TILE_WIDTH + k] * Nds[k * TILE_WIDTH + tx];
+			Pvalue += Mds[ty * width + k] * Nds[k * width + tx];
 		}
 		__syncthreads();
 	}
@@ -164,7 +166,9 @@ int main(int argc, char *argv[])
   
   //Now do the improved GPU solution
   // to get accurate timings, launch a single "warm-up" kernel
-  matrix_multiply_improved<<<num_blocks,block_size,block_size * sizeof(float)>>>(d_a, d_b, d_c, n);
+  size_t shared_size = 2 * n * n *sizeof(float);
+  
+  matrix_multiply_improved<<<num_blocks,block_size,shared_size>>>(d_a, d_b, d_c, n);
   cudaMemcpy(h_c, d_c, sizeof(float) * n * n, cudaMemcpyDeviceToHost);
 
   writeArray(h_c, n, n, "gpuout3");
@@ -178,7 +182,7 @@ int main(int argc, char *argv[])
   {
     // record a CUDA event immediately before and after the kernel launch
     cudaEventRecord(launch_begin,0);
-    matrix_multiply_improved<<<num_blocks,block_size,block_size * sizeof(float)>>>(d_a, d_b, d_c, n);
+    matrix_multiply_improved<<<num_blocks,block_size,shared_size>>>(d_a, d_b, d_c, n);
     
     cudaEventRecord(launch_end,0);
     cudaEventSynchronize(launch_end);
