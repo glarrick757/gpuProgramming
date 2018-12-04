@@ -107,7 +107,112 @@ __device__ __host__ void pushNeighbors(int currentPixelIndex, int lower_thresh, 
 	}
 }
 
-__global__ void gaussianBlur(int *d_pixelsIn, int *d_pixelsOut, double *guassian, int floatpitch, int width, int height) {
+__global__ void guassianBlur(int *d_pixelsIn, int *d_pixelsOut, double *guassian, int floatpitch, int width, int height) {
+	unsigned int i = blockIdx.y * blockDim.y + threadIdx.y;
+	i = i + 1; //because the edge of the data is not processed
+		
+	// global thread(data) column index
+	unsigned int j = blockIdx.x * blockDim.x + threadIdx.x;
+	j = j + 1; //because the edge of the data is not processed
+	
+	// check the boundary
+	if( i >= height - 1 || j >= width - 1 || i < 1 || j < 1 ) return;
+	
+	int value = d_pixelsIn[i * floatpitch + j];
+	int n = d_pixelsIn[(i - 1) * floatpitch + j];
+	int s = d_pixelsIn[(i + 1) * floatpitch + j];
+	int e = d_pixelsIn[i * floatpitch + j +1];
+	int w = d_pixelsIn[i * floatpitch - 1 + j];
+	int nw = d_pixelsIn[(i - 1) * floatpitch - 1 + j];
+	int ne = d_pixelsIn[(i - 1) * floatpitch + 1 + j];
+	int sw = d_pixelsIn[(i + 1) * floatpitch - 1 + j];
+	int se = d_pixelsIn[(i + 1) * floatpitch + 1 + j];
+	d_pixelsOut[i * floatpitch + j] = (
+					  guassian[4] * value +          //itself
+					  guassian[1] * n +          //N
+					  guassian[0] * ne +          //NE
+					  guassian[3] * e +          //E
+					  guassian[6] * se +          //SE
+					  guassian[7] * s +          //S
+					  guassian[8] * sw +          //SW
+					  guassian[5] * w +          //W
+					  guassian[2] * nw            //NW
+				   );
+}
+
+__global__ void pgmSobel(int *d_pixelsIn, int *d_pixelsOut, float *d_orientation, int floatpitch, int width, int height) {
+	unsigned int i = blockIdx.y * blockDim.y + threadIdx.y;
+	i = i + 1; //because the edge of the data is not processed
+		
+	// global thread(data) column index
+	unsigned int j = blockIdx.x * blockDim.x + threadIdx.x;
+	j = j + 1; //because the edge of the data is not processed
+	
+	// check the boundary
+	if( i >= height - 1 || j >= width - 1 || i < 1 || j < 1 ) return;
+	
+	int n = d_pixelsIn[(i - 1) * floatpitch + j];
+	int s = d_pixelsIn[(i + 1) * floatpitch + j];
+	int e = d_pixelsIn[i * floatpitch + 1 + j];
+	int w = d_pixelsIn[i * floatpitch - 1 + j];
+	int nw = d_pixelsIn[(i - 1) * floatpitch - 1 + j];
+	int ne = d_pixelsIn[(i - 1) * floatpitch + 1 + j];
+	int sw = d_pixelsIn[(i + 1) * floatpitch - 1 + j];
+	int se = d_pixelsIn[(i + 1) * floatpitch + 1 + j];
+	double dy = sw + (2 * s) + se - nw - (2 * n) - ne;
+	double dx = ne + (2 * e) + se - nw - (2 * w) - sw;
+	d_pixelsOut[i * floatpitch + j] = sqrt(dx * dx + dy * dy);
+	float angle = atan2(dy, dx);
+	if(angle < 0) {
+		angle += 3.14159;
+	}
+	d_orientation[i * floatpitch + j] = angle;
+} 
+
+__global__ void pgmNonMaximumSupression(int *d_pixelsIn, int *d_pixelsOut, float *d_orientation, int floatpitch, int width, int height) {
+	unsigned int i = blockIdx.y * blockDim.y + threadIdx.y;
+	i = i + 1; //because the edge of the data is not processed
+		
+	// global thread(data) column index
+	unsigned int j = blockIdx.x * blockDim.x + threadIdx.x;
+	j = j + 1; //because the edge of the data is not processed
+	
+	// check the boundary
+	if( i >= height - 1 || j >= width - 1 || i < 1 || j < 1 ) return;
+	
+	int value = d_pixelsIn[i * floatpitch + j];
+	int n = d_pixelsIn[(i - 1) * floatpitch + j];
+	int s = d_pixelsIn[(i + 1) * floatpitch + j];
+	int e = d_pixelsIn[i * floatpitch + j +1];
+	int w = d_pixelsIn[i * floatpitch - 1 + j];
+	int nw = d_pixelsIn[(i - 1) * floatpitch - 1 + j];
+	int ne = d_pixelsIn[(i - 1) * floatpitch + 1 + j];
+	int sw = d_pixelsIn[(i + 1) * floatpitch - 1 + j];
+	int se = d_pixelsIn[(i + 1) * floatpitch + 1 + j];
+	float orientation = d_orientation[i * floatpitch + j] * 180.0 / 3.14159;
+	
+	if(orientation > 22.5 && orientation <= 67.5) {
+		d_pixelsOut[i * floatpitch + j] = (value >= nw && value >= se) ? value : 0;
+	}
+	
+	else if(orientation > 67.5 && orientation <= 112.5) {
+		d_pixelsOut[i * floatpitch + j] = (value >= n && value >= s) ? value : 0;
+	}
+	
+	else if(orientation > 112.5 && orientation <= 157.5) {
+		d_pixelsOut[i * floatpitch + j] = (value >= sw && value >= ne) ? value : 0;
+	}
+	
+	else if((orientation > 0 && orientation <= 22.5) || (orientation > 157.5 && orientation <= 180)) {
+		d_pixelsOut[i * floatpitch + j] = (value >= e && value >= w) ? value : 0;
+	}
+	
+	else {
+		d_pixelsOut[i * floatpitch + j] = 0;
+	}
+}
+
+__global__ void gaussianBlurShared(int *d_pixelsIn, int *d_pixelsOut, double *guassian, int floatpitch, int width, int height) {
 	extern __shared__ int s_data[];
   
     // global thread(data) row index 
@@ -165,7 +270,7 @@ __global__ void gaussianBlur(int *d_pixelsIn, int *d_pixelsOut, double *guassian
                            );
 }
 
-__global__ void pgmSobel(int *d_pixelsIn, int *d_pixelsOut, float *d_orientation, int floatpitch, int width, int height) {
+__global__ void pgmSobelShared(int *d_pixelsIn, int *d_pixelsOut, float *d_orientation, int floatpitch, int width, int height) {
 	extern __shared__ int s_data[];
   
     // global thread(data) row index 
@@ -245,7 +350,7 @@ __global__ void pgmSobel(int *d_pixelsIn, int *d_pixelsOut, float *d_orientation
 	d_orientation[i * floatpitch + j] = angle;
 }
 
-__global__ void pgmNonMaximumSupression(int *d_pixelsIn, int *d_pixelsOut, float *d_orientation, int floatpitch, int width, int height) {
+__global__ void pgmNonMaximumSupressionShared(int *d_pixelsIn, int *d_pixelsOut, float *d_orientation, int floatpitch, int width, int height) {
 	extern __shared__ int s_data[];
   
     // global thread(data) row index 
@@ -325,7 +430,7 @@ __global__ void pgmNonMaximumSupression(int *d_pixelsIn, int *d_pixelsOut, float
 	}
 }
 
-__global__ void pgmHysterisisThresholding(int *d_pixelsIn, int *d_pixelsOut, int lower_thresh, int upper_thresh, int floatpitch, int width, int height) {
+__global__ void pgmHysterisisThresholdingShared(int *d_pixelsIn, int *d_pixelsOut, int lower_thresh, int upper_thresh, int floatpitch, int width, int height) {
 	//stack for storing weak edges
 	const int capacity = 1;
 	int stack[capacity];

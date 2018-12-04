@@ -110,7 +110,7 @@ float runCannyGPU(int *h_dataA, int* h_dataB, float *h_orientation, int *numCols
    dim3  threads( blockWidth, blockHeight, 1);
    
    //execute guassian blur kernel
-   gaussianBlur<<< grid, threads, shared_mem_size >>>( d_dataA, d_dataB, d_guassian, pitch/sizeof(int), *numCols, *numRows); 
+   guassianBlur<<< grid, threads, shared_mem_size >>>( d_dataA, d_dataB, d_guassian, pitch/sizeof(int), *numCols, *numRows); 
    
    cudaThreadSynchronize();
    
@@ -127,7 +127,7 @@ float runCannyGPU(int *h_dataA, int* h_dataB, float *h_orientation, int *numCols
    cudaThreadSynchronize();
    
    //execute Hysterisis Thresholding
-   pgmHysterisisThresholding<<< grid, threads >>>(d_dataB, d_dataC, lower_thresh, upper_thresh, pitch/sizeof(int), *numCols, *numRows);
+   pgmHysterisisThresholdingShared<<< grid, threads >>>(d_dataB, d_dataC, lower_thresh, upper_thresh, pitch/sizeof(int), *numCols, *numRows);
    
    cudaThreadSynchronize();
    
@@ -140,18 +140,18 @@ float runCannyGPU(int *h_dataA, int* h_dataB, float *h_orientation, int *numCols
    cudaEventRecord(launch_begin,0);
    for(r = 0; r < passes; r++) {
 	   //execute guassian blur kernel
-	   gaussianBlur<<< grid, threads, shared_mem_size >>>( d_dataA, d_dataB, d_guassian, pitch/sizeof(int), *numCols, *numRows); 
+	   gaussianBlurShared<<< grid, threads, shared_mem_size >>>( d_dataA, d_dataB, d_guassian, pitch/sizeof(int), *numCols, *numRows); 
 	   cudaThreadSynchronize();
 	   //execute sobel kernel
-	   pgmSobel<<< grid, threads, shared_mem_size >>>( d_dataB, d_dataC, d_orientation, pitch/sizeof(int), *numCols, *numRows);
+	   pgmSobelShared<<< grid, threads, shared_mem_size >>>( d_dataB, d_dataC, d_orientation, pitch/sizeof(int), *numCols, *numRows);
 	   cudaThreadSynchronize();
 	   //execute non-maximum supression kernel
-	   pgmNonMaximumSupression<<< grid, threads, shared_mem_size >>>(d_dataC, d_dataB, d_orientation, pitch/sizeof(int), *numCols, *numRows);
+	   pgmNonMaximumSupressionShared<<< grid, threads, shared_mem_size >>>(d_dataC, d_dataB, d_orientation, pitch/sizeof(int), *numCols, *numRows);
 	   //cudaError_t err = cudaGetLastError();
 	   //printf("Error 1: %s\n", cudaGetErrorString(err));
 	   cudaThreadSynchronize();
 	   //execute Hysterisis Thresholding
-	   pgmHysterisisThresholding<<< grid, threads >>>(d_dataB, d_dataC, lower_thresh, upper_thresh, pitch/sizeof(int), *numCols, *numRows);
+	   pgmHysterisisThresholdingShared<<< grid, threads >>>(d_dataB, d_dataC, lower_thresh, upper_thresh, pitch/sizeof(int), *numCols, *numRows);
    }
    
    cudaEventRecord(launch_end,0);
