@@ -1,5 +1,4 @@
 #include "pgmUtility.h"
-#include "pgmProcess.h"
 
 char ** initAra2D(int rows, int cols) {
 	int i = 0;
@@ -87,7 +86,7 @@ int pgmWrite( const char **header, const int *pixels, int numRows, int numCols, 
 	fprintf(out, "%s", header[0]);
 	fprintf(out, "%s", header[1]);
 	fprintf(out, "%s", header[2]);
-	fprintf(out, "%s", header[3]);
+	fprintf(out, "%s\n", "255");
 	
 	int i;
 	int j;
@@ -106,7 +105,7 @@ int pgmWrite( const char **header, const int *pixels, int numRows, int numCols, 
 double *computeGaussian(double sigma) {
 	double *guassian = (double *)malloc(sizeof(double) * 9);
 	int row, col, x, y;
-	printf("sigma %f\n",sigma);
+
 	for(row = 0; row < 3; row++) {
 		for(col = 0; col < 3; col++) {
 			x = abs(col - 1);

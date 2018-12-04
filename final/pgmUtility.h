@@ -57,4 +57,6 @@ int pgmWrite( const char **header, const int *pixels, int numRows, int numCols, 
 
 double *computeGaussian(double sigma);
 
+struct Stack* createStack(unsigned capacity);
+
 #endif
